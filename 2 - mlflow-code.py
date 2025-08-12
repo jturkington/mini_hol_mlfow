@@ -12,14 +12,22 @@ import cml.data_v1 as cmldata
 import joblib
 
 # -------------------------------
-# 1. Connect to Spark via CDSW
+# 0. Output directories
+# -------------------------------
+MODEL_DIR = "models_pkl"
+CSV_DIR = "scored_csv"
+os.makedirs(MODEL_DIR, exist_ok=True)
+os.makedirs(CSV_DIR, exist_ok=True)
+
+# -------------------------------
+# 1. Connect to Spark 
 # -------------------------------
 CONNECTION_NAME = "se-aws-edl"
 conn = cmldata.get_connection(CONNECTION_NAME)
 spark = conn.get_spark_session()
 
 # -------------------------------
-# 2. Load data from Impala/Hive (5K rows)
+# 2. Load data from Iceberg (5K rows)
 # -------------------------------
 EXAMPLE_SQL_QUERY = """
 SELECT laptop_id, latitude, longitude, temperature, event_ts
@@ -97,29 +105,39 @@ with mlflow.start_run(experiment_id=experiment.experiment_id, run_name=f"IF_{MOD
     df["anomaly"] = (preds == -1).astype(int)
 
     # Reference metrics
-    mlflow.log_metric("anomaly_rate", float(df["anomaly"].mean()))
+    anomaly_rate = float(df["anomaly"].mean())
+    mlflow.log_metric("anomaly_rate", anomaly_rate)
     mlflow.log_metric("num_anomalies", int(df["anomaly"].sum()))
 
-    # Signature + model
+    # Signature + model to MLflow
     try:
         signature = infer_signature(X, preds)
     except Exception:
         signature = None
     mlflow.sklearn.log_model(model, "isolation_forest_model", signature=signature)
 
-    print(f"[{MODE}] train_time_sec={train_time:.2f}, "
-          f"anomaly_rate={df['anomaly'].mean():.3f}, "
-          f"n_estimators={params['n_estimators']}, "
-          f"max_samples={params['max_samples']}, max_features={params['max_features']}")
+    # ---- Save local artifacts into folders ----
+    # 1) Model PKL -> models_pkl/
+    model_path = os.path.join(MODEL_DIR, f"anomaly_model_{MODE}.pkl")
+    joblib.dump(model, model_path)
+
+    # 2) Scored CSV sample -> scored_csv/
+    df_scored_sample = df.copy()
+    sample = df_scored_sample.sample(n=min(200, len(df_scored_sample)), random_state=0)
+    csv_path = os.path.join(CSV_DIR, f"scored_{MODE}.csv")
+    sample.to_csv(csv_path, index=False)
+
+    # Optional: also log the CSV to MLflow
+    mlflow.log_artifact(csv_path)
+
+    print(
+        f"[{MODE}] train_time_sec={train_time:.2f}, "
+        f"anomaly_rate={anomaly_rate:.3f} | "
+        f"saved model -> {model_path} | sample CSV -> {csv_path}"
+    )
 
 # -------------------------------
-# 5. Save Model Locally (optional)
-# -------------------------------
-joblib.dump(model, "anomaly_model_fast.pkl")
-print("Model trained and saved as anomaly_model_fast.pkl")
-
-# -------------------------------
-# 6. Write back results to Hive (kept as in your original)
+# 5. Write back results to Parquet Table
 # -------------------------------
 df["laptop_id"] = pd.to_numeric(df["laptop_id"], errors="coerce").astype("Int64")
 df["latitude"] = pd.to_numeric(df["latitude"], errors="coerce")
