@@ -32,7 +32,7 @@ spark = conn.get_spark_session()
 EXAMPLE_SQL_QUERY = """
 SELECT laptop_id, latitude, longitude, temperature, event_ts
 FROM workshop.laptop_data_user001
-LIMIT 5000
+LIMIT 1000
 """
 df_spark = spark.sql(EXAMPLE_SQL_QUERY)
 
