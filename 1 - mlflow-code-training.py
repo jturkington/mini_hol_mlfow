@@ -8,15 +8,19 @@ import mlflow
 import mlflow.sklearn
 from mlflow.tracking import MlflowClient
 from mlflow.models import infer_signature
-
-# Modeling
 from sklearn.ensemble import IsolationForest
 import joblib
-
-# Spark read (CML)
 from pyspark.sql import functions as F
 from pyspark.sql.types import *
 import cml.data_v1 as cmldata
+
+# -------------------------------
+# 0) Output dirs
+# -------------------------------
+MODEL_DIR = "models_pkl"
+CSV_DIR = "scored_csv"
+os.makedirs(MODEL_DIR, exist_ok=True)
+os.makedirs(CSV_DIR, exist_ok=True)
 
 # -------------------------------
 # 1) Spark connection + data load
@@ -28,7 +32,7 @@ spark = conn.get_spark_session()
 EXAMPLE_SQL_QUERY = """
 SELECT laptop_id, latitude, longitude, temperature, event_ts
 FROM workshop.laptop_data_user001
-LIMIT 5000
+LIMIT 500
 """
 
 df_spark = spark.sql(EXAMPLE_SQL_QUERY)
@@ -49,12 +53,9 @@ experiment = mlflow.set_experiment(experiment_name)
 # -------------------------------
 param_grid = {
     "contamination": [0.05, 0.10, 0.15],
-    "n_estimators": [100, 300],
-    "max_features": [1.0, 0.8],
-    #"contamination": [0.05],
-    #"n_estimators": [100],
-    #"max_features": [1.0],
-    "random_state": [42, 7],
+    "n_estimators": [100], #300
+    "max_features": [1.0], #0.8
+    "random_state": [42], #7
 }
 grid = list(itertools.product(
     param_grid["contamination"],
@@ -93,8 +94,8 @@ for contamination, n_estimators, max_features, seed in grid:
         train_time = time.time() - t0
         mlflow.log_metric("train_time_sec", float(train_time))
 
-        # Predict (-1 anomaly, 1 normal) -> {1 anomaly, 0 normal}
-        raw_preds = model.predict(X)
+        # Predict
+        raw_preds = model.predict(X)  # -1 anomaly, 1 normal
         anomalies = np.where(raw_preds == -1, 1, 0)
 
         # Metrics (unsupervised)
@@ -110,20 +111,24 @@ for contamination, n_estimators, max_features, seed in grid:
             signature = None
         mlflow.sklearn.log_model(model, "isolation_forest_model", signature=signature)
 
-        # Optional local save (per-run)
-        joblib.dump(model, f"anomaly_model_{run.info.run_id}.pkl")
+        # ----- Save artifacts to folders -----
+        # 1) PKL model -> models_pkl/
+        model_path = os.path.join(MODEL_DIR, f"anomaly_model_{run.info.run_id}.pkl")
+        joblib.dump(model, model_path)
 
-        # Small scored sample as artifact (handy for eyeballing)
+        # 2) Scored CSV sample -> scored_csv/
         df_scored_sample = df.copy()
         df_scored_sample["anomaly"] = anomalies
         sample = df_scored_sample.sample(n=min(200, len(df_scored_sample)), random_state=0)
-        sample_path = f"scored_{run.info.run_id}.csv"
+        sample_path = os.path.join(CSV_DIR, f"scored_{run.info.run_id}.csv")
         sample.to_csv(sample_path, index=False)
+
+        # Log the CSV artifact to MLflow as well (optional)
         mlflow.log_artifact(sample_path)
 
         # Print quick confirmation and the metrics actually logged
         client = MlflowClient()
         run_data = client.get_run(run.info.run_id).data
-        print(f"[Run {run.info.run_id}] logged metrics:", run_data.metrics)
+        print(f"[Run {run.info.run_id}] saved -> {model_path}, {sample_path} | metrics:", run_data.metrics)
 
 print("All runs complete.")
