@@ -19,19 +19,23 @@ CSV_DIR = "scored_csv"
 os.makedirs(MODEL_DIR, exist_ok=True)
 os.makedirs(CSV_DIR, exist_ok=True)
 
+DATALAKE_NAME = os.getenv("DATALAKE_NAME")
+SOURCE_TABLE_NAME = os.getenv("SOURCE_TABLE_NAME")
+DESTINATION_TABLE_NAME = os.getenv("DESTINATION_TABLE_NAME")
+
 # -------------------------------
 # 1. Connect to Spark 
 # -------------------------------
-CONNECTION_NAME = "se-aws-edl"
+CONNECTION_NAME = f"""{DATALAKE_NAME}"""
 conn = cmldata.get_connection(CONNECTION_NAME)
 spark = conn.get_spark_session()
 
 # -------------------------------
 # 2. Load data from Iceberg (5K rows)
 # -------------------------------
-EXAMPLE_SQL_QUERY = """
+EXAMPLE_SQL_QUERY = f"""
 SELECT laptop_id, latitude, longitude, temperature, event_ts
-FROM workshop.laptop_data_user001
+FROM {SOURCE_TABLE_NAME}
 LIMIT 1000
 """
 df_spark = spark.sql(EXAMPLE_SQL_QUERY)
@@ -160,5 +164,5 @@ schema = StructType([
 
 # Write scored data
 df_results = spark.createDataFrame(df, schema=schema)
-df_results.write.mode("overwrite").saveAsTable("workshop.laptop_data_scored_user001")
-print("Scored data saved to workshop.laptop_data_scored_user001")
+df_results.write.mode("overwrite").saveAsTable(DESTINATION_TABLE_NAME)
+print(f"Scored data saved to {DESTINATION_TABLE_NAME}")
