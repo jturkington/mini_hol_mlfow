@@ -15,23 +15,26 @@ from pyspark.sql.types import *
 import cml.data_v1 as cmldata
 
 # -------------------------------
-# 0) Output dirs
+# 0) Create Output Directories and get OS Variables
 # -------------------------------
 MODEL_DIR = "models_pkl"
 CSV_DIR = "scored_csv"
 os.makedirs(MODEL_DIR, exist_ok=True)
 os.makedirs(CSV_DIR, exist_ok=True)
 
+DATALAKE_NAME = os.getenv("DATALAKE_NAME")
+SOURCE_TABLE_NAME = os.getenv("SOURCE_TABLE_NAME")
+
 # -------------------------------
 # 1) Spark connection + data load
 # -------------------------------
-CONNECTION_NAME = "se-aws-edl"
+CONNECTION_NAME = f"""{DATALAKE_NAME}"""
 conn = cmldata.get_connection(CONNECTION_NAME)
 spark = conn.get_spark_session()
 
-EXAMPLE_SQL_QUERY = """
+EXAMPLE_SQL_QUERY = f"""
 SELECT laptop_id, latitude, longitude, temperature, event_ts
-FROM workshop.laptop_data_user001
+FROM {SOURCE_TABLE_NAME}
 LIMIT 500
 """
 
@@ -53,9 +56,9 @@ experiment = mlflow.set_experiment(experiment_name)
 # -------------------------------
 param_grid = {
     "contamination": [0.05, 0.10, 0.15],
-    "n_estimators": [100], #300
-    "max_features": [1.0], #0.8
-    "random_state": [42], #7
+    "n_estimators": [100], #, 300
+    "max_features": [1.0], #, 0.8
+    "random_state": [42], #, 7
 }
 grid = list(itertools.product(
     param_grid["contamination"],
